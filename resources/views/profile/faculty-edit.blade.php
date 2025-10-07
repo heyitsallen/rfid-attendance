@@ -3,6 +3,8 @@
 @section('title', 'Admin Profile')
 
 @section('content')
+<div class="p-6 w-full min-h-screen bg-cover bg-center" 
+     style="background-image: url('{{ asset('images/background.jpg') }}');">
 <div class="max-w-xl mx-auto p-6 bg-white dark:bg-gray-800 rounded-lg shadow">
     <h2 class="text-xl font-semibold mb-4 text-gray-900 dark:text-gray-100">Admin Profile</h2>
 
@@ -115,7 +117,7 @@
     </form>
 
 </div>
-
+</div>
 {{-- Password Modal --}}
 <div id="changePasswordModal" tabindex="-1" aria-hidden="true"
      class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/50">

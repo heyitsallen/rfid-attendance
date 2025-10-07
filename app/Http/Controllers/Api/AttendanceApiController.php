@@ -10,11 +10,13 @@ use App\Models\{
 };
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Cache;
 
 class AttendanceApiController extends Controller
 {
     public function scan(Request $r)
     {
+        
         Log::info('SCAN request', $r->all());
 
         $data = $r->validate([
@@ -28,19 +30,56 @@ class AttendanceApiController extends Controller
         $timeNow    = $now->format('H:i:s');
         $dayEnum    = $this->dayToEnum($now); // "Mon".."Sun"
 
-        // 1) Verify device
-        $device = Device::where('serial_no', $data['serial_no'])
-            ->where('token', $data['device_token'])
-            ->first();
+        // Normalize inputs
+    $serial = trim((string)$data['serial_no']);
+    $token  = (string)$data['device_token'];
+    $uid    = strtoupper(preg_replace('/[^0-9A-F]/i', '', $data['uid'] ?? ''));
 
-        if (!$device) {
+    // Admin/enroll short-circuit
+    $enrollSerial = config('rfid.enroll_serial', 'admin');
+    $enrollToken  = (string) config('rfid.enroll_token');
+
+    if ($serial === $enrollSerial) {
+        if (!$enrollToken || !hash_equals($enrollToken, $token)) {
+            Log::warning('Enroll token mismatch', ['serial' => $serial]);
             return response()->json([
                 'ok' => false,
-                'display_line1' => 'INVALID DEVICE',
-                'display_line2' => 'Check token/serial',
+                'display_line1' => 'INVALID ENROLL TOKEN',
+                'display_line2' => 'Check RFID_ENROLL_TOKEN',
                 'beep' => 'error'
             ], 401);
         }
+
+        Cache::put("rfid:last:{$enrollSerial}", $uid, now()->addMinutes(2));
+        Cache::put("rfid:last_at:{$enrollSerial}", $now->toIso8601String(), now()->addMinutes(2));
+
+        return response()->json([
+            'ok' => true,
+            'mode' => 'enroll',
+            'uid' => $uid,
+            'display_line1' => 'ADMIN SCAN',
+            'display_line2' => $uid,
+            'beep' => 'ok'
+        ]);
+    }
+
+    // Normal device path
+    $device = Device::where('serial_no', $serial)
+        ->where('token', $token)
+        ->first();
+
+    if (!$device) {
+        Log::warning('Invalid device', ['serial' => $serial]);
+        return response()->json([
+            'ok' => false,
+            'display_line1' => 'INVALID DEVICE',
+            'display_line2' => 'Check token/serial',
+            'beep' => 'error'
+        ], 401);
+    }
+
+    Cache::put("rfid:last:{$serial}", $uid, now()->addMinutes(2));
+    Cache::put("rfid:last_at:{$serial}", $now->toIso8601String(), now()->addMinutes(2));
 
         // 2) Resolve card -> user
         $card = Card::where('uid', $data['uid'])->where('is_active', true)->first();

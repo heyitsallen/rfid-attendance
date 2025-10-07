@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 class StudentAttendance extends Model
 {
     protected $fillable = [
-        'student_id','section_schedule_id','device_id',
+        'student_no','section_schedule_id','device_id',
         'class_date','time_in','time_out','status'
     ];
 
@@ -18,7 +18,7 @@ class StudentAttendance extends Model
         'time_out'   => 'datetime',
     ];
 
-    public function student(): BelongsTo { return $this->belongsTo(User::class, 'student_id'); }
+    public function student(): BelongsTo { return $this->belongsTo(User::class, 'student_no'); }
     public function schedule(): BelongsTo { return $this->belongsTo(SectionSchedule::class, 'section_schedule_id'); }
     public function device(): BelongsTo { return $this->belongsTo(Device::class); }
 }

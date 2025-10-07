@@ -27,31 +27,31 @@ LiquidCrystal_I2C lcd(0x27, 16, 2);   // If blank, run I2C scanner and update
 MFRC522 mfrc522(SS_PIN, RST_PIN);
 
 // Buzzer (active buzzer MH-FMD)
-#define BUZZER_PIN D8
+#define BUZZER_PIN D4
 
 // Debounce UID
 String lastUID = "";
 unsigned long lastScanMs = 0;
 const unsigned long SCAN_COOLDOWN_MS = 2500;
 
-// ================= BUZZER HELPERS =================
+inline void buzzOn()  { digitalWrite(BUZZER_PIN, LOW); }   // active-low
+inline void buzzOff() { digitalWrite(BUZZER_PIN, HIGH); }  // idle
+
 void beepOK() {
   Serial.println("[BUZZER] OK beep");
-  digitalWrite(BUZZER_PIN, LOW); delay(100);
-  digitalWrite(BUZZER_PIN, HIGH); delay(100);
-  digitalWrite(BUZZER_PIN, LOW); delay(100);
-  digitalWrite(BUZZER_PIN, HIGH);
+  buzzOn();  delay(100);
+  buzzOff(); delay(100);
+  buzzOn();  delay(100);
+  buzzOff(); // IMPORTANT: end off
 }
 
 void beepErr() {
   Serial.println("[BUZZER] ERROR beep");
-  for (int i=0; i<80; i++) {
-    digitalWrite(BUZZER_PIN, LOW);
-    delayMicroseconds(500);
-    digitalWrite(BUZZER_PIN, HIGH);
-    delayMicroseconds(1500);
-  }
+  // two short beeps, end OFF
+  buzzOn();  delay(500);
+  buzzOff(); // IMPORTANT: end off
 }
+
 
 // ================= LCD =================
 void lcdMsg(const String &l1, const String &l2) {
@@ -152,7 +152,7 @@ void setup() {
   Serial.begin(115200);
 
   pinMode(BUZZER_PIN, OUTPUT);
-  digitalWrite(BUZZER_PIN, HIGH); // idle HIGH for active buzzer used here
+  buzzOff();  // idle HIGH for active buzzer used here
 
   Wire.begin(D2, D1);   // SDA=D2, SCL=D1
   lcd.init();
@@ -161,6 +161,8 @@ void setup() {
 
   SPI.begin();
   mfrc522.PCD_Init();
+  mfrc522.PCD_SetAntennaGain(mfrc522.RxGain_max);
+  mfrc522.PCD_AntennaOn();
 
   delay(500);
   connectWiFi();

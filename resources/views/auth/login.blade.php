@@ -6,7 +6,8 @@
   @vite(['resources/css/app.css', 'resources/js/app.js'])
   <meta name="viewport" content="width=device-width, initial-scale=1">
 </head>
-<body class="bg-gray-50 dark:bg-gray-900">
+<body class="p-6 w-full min-h-screen bg-cover bg-center" 
+     style="background-image: url('{{ asset('images/background.jpg') }}');">
 
   <section class="flex flex-col items-center justify-center min-h-screen px-4 sm:px-6 lg:px-8 py-8">
 

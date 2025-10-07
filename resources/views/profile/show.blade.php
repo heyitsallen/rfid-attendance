@@ -3,6 +3,8 @@
 @section('title', 'My Profile')
 
 @section('content')
+<div class="p-6 w-full min-h-screen bg-cover bg-center" 
+     style="background-image: url('{{ asset('images/background.jpg') }}');">
 <div class="w-full max-w-2xl mx-auto p-6 bg-white rounded-lg shadow">
     <h2 class="text-2xl font-bold mb-4">My Account</h2>
 
@@ -62,5 +64,6 @@
             </a>
         @endif
     </div>
+</div>
 </div>
 @endsection

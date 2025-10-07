@@ -27,6 +27,8 @@ export default {
           950: "#172554"
         }
       },
+
+      
       fontFamily: {
         body: [
           'Inter', 'ui-sans-serif', 'system-ui',

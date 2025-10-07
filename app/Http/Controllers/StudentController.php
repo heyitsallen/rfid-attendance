@@ -14,7 +14,7 @@ class StudentController extends Controller
 
         public function schedule() {
 
-         $active = 'schedule';
+         $active = 'attendance';
         return view('student.schedule', compact('active'));
     }
 }

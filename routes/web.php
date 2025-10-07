@@ -1,5 +1,7 @@
 <?php
 
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\AdminController;
@@ -10,11 +12,8 @@ use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\AdminProfileController;
 use App\Http\Controllers\StudentProfileController;
 use App\Http\Controllers\FacultyProfileController;
-/*
-|--------------------------------------------------------------------------
-| Web Routes
-|--------------------------------------------------------------------------
-*/
+use App\Http\Controllers\AdminUserController;
+use App\Http\Controllers\AdminCardController;
 
 // Guest-only auth pages
 Route::middleware('guest')->group(function () {
@@ -51,6 +50,25 @@ Route::middleware(['auth','role:admin'])->group(function () {
     Route::get('/admin/management', [AdminController::class, 'management'])->name('admin.management');
     Route::get('/admin/attendance', [AdminController::class, 'attendance'])->name('admin.attendance');
     Route::get('/admin/reports', [AdminController::class, 'reports'])->name('admin.reports');
+
+    // Users
+    Route::post('/admin/users',          [AdminUserController::class, 'store'])->name('admin.users.store');      // add student/faculty
+    Route::put('/admin/users/{user}',    [AdminUserController::class, 'update'])->name('admin.users.update');    // edit user and link cards
+    Route::patch('/admin/users/{user}', [AdminUserController::class, 'destroy'])->name('admin.users.destroy');  // delete user
+
+    // Cards
+    Route::post('/admin/cards/check',  [AdminCardController::class, 'check'])->name('admin.cards.check');        // check if card UID exists / owner
+    Route::post('/admin/cards/link',   [AdminCardController::class, 'link'])->name('admin.cards.link');          // link card to user (current SY)
+    Route::put('/admin/cards/{card}',  [AdminCardController::class, 'update'])->name('admin.cards.update');      // toggle status, edit meta
+
+
+        // Polling endpoint used by the view to auto-fill UID
+    Route::get('/admin/scans/last', function (Request $request) {
+        $request->validate(['device' => 'required|string']);
+        $device = trim($request->query('device'));
+        $uid    = Cache::get("rfid:last:$device"); // null if no recent scan
+        return response()->json(['uid' => $uid])->header('Cache-Control', 'no-store');
+    })->name('admin.scans.last');
 });
 
 // Student Profile

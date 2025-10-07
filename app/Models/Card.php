@@ -16,4 +16,5 @@ class Card extends Model
     ];
 
     public function user(): BelongsTo { return $this->belongsTo(User::class); }
+    public function schoolYear() { return $this->belongsTo(SchoolYear::class); }
 }

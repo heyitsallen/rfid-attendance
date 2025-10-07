@@ -5,6 +5,7 @@
     <title>@yield('title', 'RFID Attendance Tracker')</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
+    <style>[x-cloak]{display:none!important}</style>
     {{-- Tailwind via Vite --}}
     @vite(['resources/css/app.css', 'resources/js/app.js'])
 
@@ -124,7 +125,7 @@
     </nav>
 
     {{-- Page wrapper --}}
-    <div class="flex pt-20">
+    <div class="flex pt-16">
         @yield('content')
     </div>
 

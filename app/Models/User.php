@@ -18,7 +18,7 @@ class User extends Authenticatable
         'email',
         'password',
         'role',
-        'student_id',
+        'student_no',
         'employee_no',
         'section_id',
         'status',
@@ -32,7 +32,7 @@ class User extends Authenticatable
     public function assignedSubjects(): HasMany { return $this->hasMany(FacultyAssignedSubject::class, 'faculty_id'); }
     public function sectionSchedules(): HasMany { return $this->hasMany(SectionSchedule::class, 'faculty_id'); }
     public function facultyAttendances(): HasMany { return $this->hasMany(FacultyAttendance::class, 'faculty_id'); }
-    public function studentAttendances(): HasMany { return $this->hasMany(StudentAttendance::class, 'student_id'); }
+    public function studentAttendances(): HasMany { return $this->hasMany(StudentAttendance::class, 'student_no'); }
 
     // Accessors
     public function getFullNameAttribute(): string
