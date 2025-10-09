@@ -10,6 +10,7 @@ use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Auth\Events\PasswordReset;
+use App\Models\User;
 
 class AuthController extends Controller
 {
@@ -25,9 +26,9 @@ class AuthController extends Controller
         $cred = $req->validate([
             'email'    => 'required|email',
             'password' => 'required|string',
-            // no boolean rule for remember
         ]);
 
+        // Still ensure only active users can log in
         $attempt = Auth::attempt(
             ['email' => $cred['email'], 'password' => $cred['password'], 'status' => 'active'],
             $req->boolean('remember')
@@ -43,22 +44,20 @@ class AuthController extends Controller
         RateLimiter::clear($this->throttleKey($req));
         $req->session()->regenerate();
 
+        /** @var User $user */
         $user = Auth::user();
 
-        $defaults = [
-            'admin'   => route('admin.dashboard'),
-            'faculty' => route('faculty.attendance'),
-            'student' => route('student.attendance'),
-        ];
+        // Determine default landing route by role priority: admin > faculty > student
+        $redirect = $this->defaultRouteFor($user);
 
-        if (!isset($defaults[$user->role])) {
+        if (!$redirect) {
             Auth::logout();
             throw ValidationException::withMessages([
                 'email' => __('Unauthorized role.'),
             ]);
         }
 
-        return redirect()->intended($defaults[$user->role]);
+        return redirect()->intended($redirect);
     }
 
     public function logout(Request $req)
@@ -73,23 +72,21 @@ class AuthController extends Controller
     // Password Reset Methods
     // =====================
 
-    // Show "forgot password" form
     public function showForgotPassword()
     {
         return view('auth.forgot-password');
     }
 
-    // Handle reset link request
     public function sendResetLink(Request $request)
     {
-            $request->validate(
-        [
-            'email' => ['required', 'email', 'exists:users,email'],
-        ],
-        [
-            'email.exists' => 'We couldn’t find that email in our records.',
-        ]
-    );
+        $request->validate(
+            [
+                'email' => ['required', 'email', 'exists:users,email'],
+            ],
+            [
+                'email.exists' => 'We couldn’t find that email in our records.',
+            ]
+        );
 
         $status = Password::sendResetLink($request->only('email'));
 
@@ -98,7 +95,6 @@ class AuthController extends Controller
             : back()->withErrors(['email' => __($status)]);
     }
 
-    // Show reset form (from email link)
     public function showResetForm(Request $request, $token = null)
     {
         return view('auth.reset-password', [
@@ -107,7 +103,6 @@ class AuthController extends Controller
         ]);
     }
 
-    // Handle actual reset
     public function resetPassword(Request $request)
     {
         $request->validate([
@@ -151,5 +146,23 @@ class AuthController extends Controller
         throw ValidationException::withMessages([
             'email' => __('Too many attempts. Try again in :seconds seconds.', ['seconds' => $seconds]),
         ]);
+    }
+
+    /**
+     * Decide where to send the user after login based on active roles.
+     * Priority: admin > faculty > student
+     */
+    private function defaultRouteFor(User $user): ?string
+    {
+        if ($user->hasRole('admin')) {
+            return route('admin.dashboard');
+        }
+        if ($user->hasRole('faculty')) {
+            return route('faculty.attendance');
+        }
+        if ($user->hasRole('student')) {
+            return route('student.attendance');
+        }
+        return null;
     }
 }

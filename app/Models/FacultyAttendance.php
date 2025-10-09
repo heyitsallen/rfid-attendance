@@ -3,13 +3,11 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class FacultyAttendance extends Model
 {
     protected $fillable = [
-        'faculty_id','section_schedule_id','device_id',
-        'class_date','time_in','time_out','status'
+        'section_schedule_id','device_id','class_date','time_in','time_out','status'
     ];
 
     protected $casts = [
@@ -18,7 +16,12 @@ class FacultyAttendance extends Model
         'time_out'   => 'datetime',
     ];
 
-    public function faculty(): BelongsTo { return $this->belongsTo(User::class, 'faculty_id'); }
-    public function schedule(): BelongsTo { return $this->belongsTo(SectionSchedule::class, 'section_schedule_id'); }
-    public function device(): BelongsTo { return $this->belongsTo(Device::class); }
+    public function sectionSchedule() { return $this->belongsTo(SectionSchedule::class); }
+    public function device() { return $this->belongsTo(Device::class); }
+
+    // Convenience helper (two-hop; not a relationship)
+    public function facultyUser()
+    {
+        return optional($this->sectionSchedule?->assignment)->faculty;
+    }
 }

@@ -3,11 +3,10 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Semester extends Model
 {
-    protected $fillable = ['name'];
+    protected $fillable = ['school_year_id','name'];
 
-    public function assignedSubjects(): HasMany { return $this->hasMany(FacultyAssignedSubject::class); }
+    public function schoolYear() { return $this->belongsTo(SchoolYear::class); }
 }

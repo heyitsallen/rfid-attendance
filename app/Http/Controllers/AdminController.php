@@ -6,7 +6,7 @@ use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use App\Models\{
-    User, Device, Section, SectionSchedule, YearLevel,
+    User, Role, Device, Section, SectionSchedule, YearLevel, FacultyProfile, SectionEnrollment, StudentProfile,
     FacultyAssignedSubject, SubjectCurriculum, Room, SchoolYear
 };
 

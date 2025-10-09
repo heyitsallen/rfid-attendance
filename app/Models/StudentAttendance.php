@@ -3,7 +3,6 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class StudentAttendance extends Model
 {
@@ -18,7 +17,7 @@ class StudentAttendance extends Model
         'time_out'   => 'datetime',
     ];
 
-    public function student(): BelongsTo { return $this->belongsTo(User::class, 'student_id'); }
-    public function schedule(): BelongsTo { return $this->belongsTo(SectionSchedule::class, 'section_schedule_id'); }
-    public function device(): BelongsTo { return $this->belongsTo(Device::class); }
+    public function student() { return $this->belongsTo(User::class, 'student_id'); }
+    public function sectionSchedule() { return $this->belongsTo(SectionSchedule::class); }
+    public function device() { return $this->belongsTo(Device::class); }
 }

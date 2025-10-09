@@ -14,17 +14,18 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware) {
         // Aliases (use in routes)
         $middleware->alias([
-            'guest'  => \App\Http\Middleware\RedirectIfAuthenticated::class,
-            'active' => \App\Http\Middleware\EnsureUserIsActive::class,
-            'role'   => \App\Http\Middleware\Role::class,
-            'device' => \App\Http\Middleware\DeviceAuth::class, // optional
-            'nocache' => \App\Http\Middleware\PreventBackHistory::class,
+            // Built-ins / project-specific
+            'guest'   => \App\Http\Middleware\RedirectIfAuthenticated::class,
+            'active'  => \App\Http\Middleware\EnsureUserIsActive::class,   // if you keep an "active" check
+            'device'  => \App\Http\Middleware\DeviceAuth::class,           // optional, for device-protected routes
+            'nocache' => \App\Http\Middleware\PreventBackHistory::class,   // if you use it
+
+            // New multi-role middleware (replaces old "Role" enum-based middleware)
+            'role' => \App\Http\Middleware\AuthMiddleware::class,
         ]);
 
-        // Optionally append a global middleware (runs on every request)
+        // Optionally add global or group middleware:
         // $middleware->append(\App\Http\Middleware\EnsureUserIsActive::class);
-
-        // Or add to groups:
         // $middleware->group('web', [
         //     \App\Http\Middleware\EnsureUserIsActive::class,
         // ]);

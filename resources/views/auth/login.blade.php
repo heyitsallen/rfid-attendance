@@ -6,6 +6,8 @@
   @vite(['resources/css/app.css', 'resources/js/app.js'])
   <meta name="viewport" content="width=device-width, initial-scale=1">
 </head>
+<div class="p-6 w-full min-h-screen bg-cover bg-center" 
+     style="background-image: url('{{ asset('images/background.jpg') }}');">
 <body class="bg-gray-50 dark:bg-gray-900">
 
   <section class="flex flex-col items-center justify-center min-h-screen px-4 sm:px-6 lg:px-8 py-8">
@@ -104,18 +106,6 @@
   </div>
 </div>
 
-          {{-- Remember + forgot --}}
-          <div class="flex items-center justify-between">
-            <div class="flex items-center">
-              <input
-                id="remember"
-                name="remember"
-                type="checkbox"
-                class="w-4 h-4 border border-gray-300 rounded bg-gray-50 focus:ring-3 focus:ring-primary-300 dark:bg-gray-700 dark:border-gray-600 dark:focus:ring-primary-600 dark:ring-offset-gray-800"
-              >
-              <label for="remember" class="ml-2 text-sm text-gray-500 dark:text-gray-300">Remember me</label>
-            </div>
-
             <a href="{{ route('password.request') }}" class="text-sm font-medium text-primary-600 hover:underline dark:text-primary-400">
               Forgot password?
             </a>
@@ -132,7 +122,7 @@
       </div>
     </div>
 
-
+  </div>
 <script>
   const passwordInput = document.getElementById("password");
   const togglePassword = document.getElementById("togglePassword");

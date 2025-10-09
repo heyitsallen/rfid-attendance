@@ -3,45 +3,82 @@
 namespace App\Models;
 
 use Illuminate\Foundation\Auth\User as Authenticatable;
-use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Notifications\Notifiable;
-use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Database\Eloquent\Casts\Attribute;
 
 class User extends Authenticatable
 {
     use Notifiable, SoftDeletes;
 
     protected $fillable = [
-        'firstname',
-        'middlename',
-        'lastname',
-        'email',
-        'password',
-        'role',
-        'student_id',
-        'employee_no',
-        'section_id',
-        'status',
-        'profile_photo', 
+        'firstname','middlename','lastname','email','password','status','profile_photo',
     ];
 
     protected $hidden = ['password','remember_token'];
 
-    // Relationships
-    public function cards(): HasMany { return $this->hasMany(Card::class); }
-    public function assignedSubjects(): HasMany { return $this->hasMany(FacultyAssignedSubject::class, 'faculty_id'); }
-    public function sectionSchedules(): HasMany { return $this->hasMany(SectionSchedule::class, 'faculty_id'); }
-    public function facultyAttendances(): HasMany { return $this->hasMany(FacultyAttendance::class, 'faculty_id'); }
-    public function studentAttendances(): HasMany { return $this->hasMany(StudentAttendance::class, 'student_id'); }
+    protected $casts = [
+        'email_verified_at' => 'datetime',
+    ];
 
-    // Accessors
-    public function getFullNameAttribute(): string
+    /* -------------------------
+     | Accessors
+     * ------------------------*/
+    public function fullName(): Attribute
     {
-        return trim($this->firstname.' '.($this->middlename ? $this->middlename.' ' : '').$this->lastname);
+        return Attribute::get(function () {
+            return trim($this->firstname.' '.($this->middlename ? $this->middlename.' ' : '').$this->lastname);
+        });
     }
 
-    // Scopes
+    /* -------------------------
+     | Scopes
+     * ------------------------*/
     public function scopeActive($q)  { return $q->where('status', 'active'); }
-    public function scopeFaculty($q) { return $q->where('role', 'faculty'); }
-    public function scopeStudent($q) { return $q->where('role', 'student'); }
+    public function scopeInactive($q){ return $q->where('status', 'inactive'); }
+
+    /* -------------------------
+     | Roles
+     * ------------------------*/
+    public function roles()
+    {
+        return $this->belongsToMany(Role::class, 'user_roles')
+            ->withPivot(['is_active','assigned_at','revoked_at'])
+            ->withTimestamps();
+    }
+
+    public function activeRoles()
+    {
+        return $this->roles()->wherePivot('is_active', true);
+    }
+
+    public function hasRole(string $name): bool
+    {
+        return $this->activeRoles()->where('roles.name', $name)->exists();
+    }
+
+    /* -------------------------
+     | Profiles
+     * ------------------------*/
+    public function studentProfile() { return $this->hasOne(StudentProfile::class); }
+    public function facultyProfile() { return $this->hasOne(FacultyProfile::class); }
+
+    /* -------------------------
+     | Cards
+     * ------------------------*/
+    public function cards() { return $this->hasMany(Card::class); }
+
+    public function activeCard() { return $this->hasOne(Card::class)->where('is_active', true)->latestOfMany(); }
+
+    /* -------------------------
+     | Academics (as student)
+     * ------------------------*/
+    public function sectionEnrollments() { return $this->hasMany(SectionEnrollment::class, 'student_id'); }
+
+    public function studentAttendances() { return $this->hasMany(StudentAttendance::class, 'student_id'); }
+
+    /* -------------------------
+     | Academics (as faculty)
+     * ------------------------*/
+    public function facultyAssignments() { return $this->hasMany(FacultyAssignedSubject::class, 'faculty_id'); }
 }

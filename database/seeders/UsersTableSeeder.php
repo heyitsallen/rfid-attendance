@@ -3,49 +3,52 @@
 namespace Database\Seeders;
 
 use Illuminate\Database\Seeder;
-use Illuminate\Support\Facades\Hash;
 use App\Models\User;
+use App\Models\Role;
+use Illuminate\Support\Facades\Hash;
 
 class UsersTableSeeder extends Seeder
 {
     public function run(): void
     {
         // Admin
-        User::updateOrCreate(
-            ['email' => 'yesitsmeallen@gmail.com'],
+        $admin = User::firstOrCreate(
+            ['email' => 'admin@example.com'],
             [
-                'firstname' => 'Edward Allen',
-                'lastname'  => 'Chua',
+                'firstname' => 'System',
+                'lastname'  => 'Administrator',
                 'password'  => Hash::make('password123'),
-                'role'      => 'admin',
                 'status'    => 'active',
             ]
         );
 
+        $adminRole = Role::where('name', 'admin')->first();
+        if ($adminRole && !$admin->roles()->where('role_id', $adminRole->id)->exists()) {
+            $admin->roles()->attach($adminRole->id);
+        }
+
         // Faculty
-        User::updateOrCreate(
-            ['email' => 'faculty@example.com'],
+        $faculty = User::firstOrCreate(
+            ['email' => 'faculty1@example.com'],
             [
-                'employee_no' => 'EMP-1001',
-                'firstname'   => 'Juan',
-                'lastname'    => 'Dela Cruz',
-                'password'    => Hash::make('password'),
-                'role'        => 'faculty',
-                'status'      => 'active',
+                'firstname' => 'Jane',
+                'lastname'  => 'Doe',
+                'password'  => Hash::make('password123'),
+                'status'    => 'active',
             ]
         );
+        $faculty->roles()->syncWithoutDetaching([Role::where('name', 'faculty')->first()->id]);
 
         // Student
-        User::updateOrCreate(
-            ['email' => 'student@example.com'],
+        $student = User::firstOrCreate(
+            ['email' => 'student1@example.com'],
             [
-                'student_no' => 'STU-2001',
-                'firstname'  => 'Maria',
-                'lastname'   => 'Santos',
-                'password'   => Hash::make('password'),
-                'role'       => 'student',
-                'status'     => 'active',
+                'firstname' => 'John',
+                'lastname'  => 'Smith',
+                'password'  => Hash::make('password123'),
+                'status'    => 'active',
             ]
         );
+        $student->roles()->syncWithoutDetaching([Role::where('name', 'student')->first()->id]);
     }
 }
