@@ -1,15 +1,15 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\Auth;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\AdminController;
 use App\Http\Controllers\StudentController;
 use App\Http\Controllers\FacultyController;
-use App\Http\Controllers\AdminAjaxController; // keep if used elsewhere
-use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\AdminProfileController;
 use App\Http\Controllers\StudentProfileController;
 use App\Http\Controllers\FacultyProfileController;
+use App\Http\Controllers\ProfileController;
 
 /*
 |--------------------------------------------------------------------------
@@ -17,18 +17,42 @@ use App\Http\Controllers\FacultyProfileController;
 |--------------------------------------------------------------------------
 */
 
+/**
+ * Root → if logged in, send to role-based home; else to login.
+ */
+Route::get('/', function () {
+    $user = Auth::user();
+    if (!$user) {
+        return redirect()->route('login');
+    }
+
+    // Prefer many-to-many roles; fall back to computed role_name
+    if ($user->hasRole('admin') || $user->role_name === 'admin') {
+        return redirect()->route('admin.dashboard');
+    }
+    if ($user->hasRole('faculty') || $user->role_name === 'faculty') {
+        return redirect()->route('faculty.schedule');
+    }
+    if ($user->hasRole('student') || $user->role_name === 'student') {
+        return redirect()->route('student.schedule');
+    }
+
+    // Default: generic profile
+    return redirect()->route('profile.show');
+})->name('home');
+
 // ----------------------
-// Guest-only auth pages
+// Guest-only (auth)
 // ----------------------
 Route::middleware('guest')->group(function () {
     Route::get('/login',  [AuthController::class, 'showLogin'])->name('login');
     Route::post('/login', [AuthController::class, 'login'])->name('login.post');
 
-    // Forgot/reset password flows are generally guest pages
-    Route::get('/forgot-password',  [AuthController::class, 'showForgotPassword'])->name('password.request');
-    Route::post('/forgot-password', [AuthController::class, 'sendResetLink'])->name('password.email');
+    // Password reset flow (guest)
+    Route::get('/forgot-password',        [AuthController::class, 'showForgotPassword'])->name('password.request');
+    Route::post('/forgot-password',       [AuthController::class, 'sendResetLink'])->name('password.email');
     Route::get('/reset-password/{token}', [AuthController::class, 'showResetForm'])->name('password.reset');
-    Route::post('/reset-password', [AuthController::class, 'resetPassword'])->name('password.update');
+    Route::post('/reset-password',        [AuthController::class, 'resetPassword'])->name('password.update');
 });
 
 // ----------------------
@@ -38,40 +62,70 @@ Route::post('/logout', [AuthController::class, 'logout'])
     ->middleware('auth')
     ->name('logout');
 
-// Everything below requires an authenticated, active user and disables back-cache
+// Everything below: must be authenticated & active; prevent back cache.
+// NOTE: ensure these middleware are aliased in bootstrap/app.php:
+//   'active'  => \App\Http\Middleware\Active::class
+//   'nocache' => \App\Http\Middleware\NoCache::class
+//   'role'    => \App\Http\Middleware\Role::class
 Route::middleware(['auth', 'active', 'nocache'])->group(function () {
 
-    // ----- Profile (generic) -----
-    Route::get('/profile', [ProfileController::class, 'show'])->name('profile.show');
-    Route::post('/profile/password', [ProfileController::class, 'updatePassword'])->name('profile.password.update');
-
-    // ----- Admin -----
-    Route::middleware('role:admin')->group(function () {
-        Route::get('/admin/profile',  [AdminProfileController::class, 'edit'])->name('admin.profile.edit');
-        Route::post('/admin/profile', [AdminProfileController::class, 'update'])->name('admin.profile.update');
-
-        Route::get('/admin/dashboard',  [AdminController::class, 'dashboard'])->name('admin.dashboard');
-        Route::get('/admin/management', [AdminController::class, 'management'])->name('admin.management');
-        Route::get('/admin/attendance', [AdminController::class, 'attendance'])->name('admin.attendance');
-        Route::get('/admin/reports',    [AdminController::class, 'reports'])->name('admin.reports');
+    // ----- Generic Profile -----
+    Route::prefix('profile')->name('profile.')->group(function () {
+        Route::get('/',            [ProfileController::class, 'show'])->name('show');
+        Route::post('/password',   [ProfileController::class, 'updatePassword'])->name('password.update');
+        // Add other generic profile endpoints here
     });
 
-    // ----- Student -----
-    Route::middleware('role:student')->group(function () {
-        Route::get('/student/profile',  [StudentProfileController::class, 'edit'])->name('student.profile.edit');
-        Route::post('/student/profile', [StudentProfileController::class, 'update'])->name('student.profile.update');
+    // ==========================
+    // Admin Area
+    // ==========================
+    Route::middleware('role:admin')->prefix('admin')->name('admin.')->group(function () {
+        // Profile
+        Route::get('/profile',  [AdminProfileController::class, 'edit'])->name('profile.edit');
+        Route::post('/profile', [AdminProfileController::class, 'update'])->name('profile.update');
 
-        Route::get('/student/attendance', [StudentController::class, 'attendance'])->name('student.attendance');
-        Route::get('/student/schedule',   [StudentController::class, 'schedule'])->name('student.schedule');
+        // App pages
+        Route::get('/dashboard',  [AdminController::class, 'dashboard'])->name('dashboard');
+        Route::get('/management', [AdminController::class, 'management'])->name('management');
+        Route::get('/attendance', [AdminController::class, 'attendance'])->name('attendance');
+        Route::get('/reports',    [AdminController::class, 'reports'])->name('reports');
+
+        // If you have admin actions that mutate state, prefer POST/PUT/PATCH/DELETE here.
+        // Example:
+        // Route::post('/users/{user}/deactivate', [AdminUserController::class, 'deactivate'])->name('users.deactivate');
     });
 
-    // ----- Faculty -----
-    Route::middleware('role:faculty')->group(function () {
-        Route::get('/faculty/profile',  [FacultyProfileController::class, 'edit'])->name('faculty.profile.edit');
-        Route::post('/faculty/profile', [FacultyProfileController::class, 'update'])->name('faculty.profile.update');
+    // ==========================
+    // Student Area
+    // ==========================
+    Route::middleware('role:student')->prefix('student')->name('student.')->group(function () {
+        // Profile
+        Route::get('/profile',  [StudentProfileController::class, 'edit'])->name('profile.edit');
+        Route::post('/profile', [StudentProfileController::class, 'update'])->name('profile.update');
 
-        Route::get('/faculty/attendance', [FacultyController::class, 'attendance'])->name('faculty.attendance');
-        Route::get('/faculty/schedule',   [FacultyController::class, 'schedule'])->name('faculty.schedule');
-        Route::get('/faculty/personal',   [FacultyController::class, 'personal'])->name('faculty.personal');
+        // Views
+        Route::get('/attendance', [StudentController::class, 'attendance'])->name('attendance');
+        Route::get('/schedule',   [StudentController::class, 'schedule'])->name('schedule');
     });
+
+    // ==========================
+    // Faculty Area
+    // ==========================
+    Route::middleware('role:faculty')->prefix('faculty')->name('faculty.')->group(function () {
+        // Profile
+        Route::get('/profile',  [FacultyProfileController::class, 'edit'])->name('profile.edit');
+        Route::post('/profile', [FacultyProfileController::class, 'update'])->name('profile.update');
+
+        // Views
+        Route::get('/attendance', [FacultyController::class, 'attendance'])->name('attendance');
+        Route::get('/schedule',   [FacultyController::class, 'schedule'])->name('schedule');
+        Route::get('/personal',   [FacultyController::class, 'personal'])->name('personal');
+    });
+});
+
+// ----------------------
+// Fallback (404)
+// ----------------------
+Route::fallback(function () {
+    abort(404);
 });

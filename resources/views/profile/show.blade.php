@@ -3,25 +3,44 @@
 @section('title', 'My Profile')
 
 @section('content')
+@php
+    /** @var \App\Models\User $user */
+    // Prefer accessor + active roles (many-to-many), with safe fallbacks
+    $primaryRole = $user->role_name; // from getRoleNameAttribute
+    $activeRoles = method_exists($user, 'activeRoles')
+        ? ($user->relationLoaded('roles') ? $user->activeRoles : $user->activeRoles())->pluck('name')->map(fn($n)=>strtolower($n))->unique()->values()
+        : collect([$primaryRole])->filter();
+
+    // IDs from profile tables, with legacy fallbacks
+    $studentNo = optional($user->studentProfile)->student_no ?? ($user->student_id ?? null);
+    $employeeNo = optional($user->facultyProfile)->employee_no ?? ($user->employee_no ?? null);
+
+    // Decide which edit route to show (priority: admin > faculty > student), fallback to profile.show
+    if ($user->hasRole('admin') || $primaryRole === 'admin') {
+        $editRoute = route('admin.profile.edit');
+    } elseif ($user->hasRole('faculty') || $primaryRole === 'faculty') {
+        $editRoute = route('faculty.profile.edit');
+    } elseif ($user->hasRole('student') || $primaryRole === 'student') {
+        $editRoute = route('student.profile.edit');
+    } else {
+        $editRoute = route('profile.show');
+    }
+@endphp
+
 <div class="w-full max-w-2xl mx-auto p-6 bg-white rounded-lg shadow">
     <h2 class="text-2xl font-bold mb-4">My Account</h2>
 
     <div class="flex items-center space-x-4 mb-6">
         {{-- Profile photo --}}
-        @if ($user->profile_photo)
-            <img src="{{ asset('storage/' . $user->profile_photo) }}"
-                 class="w-20 h-20 rounded-full border object-cover"
-                 alt="Profile Photo">
-        @else
-            <img src="{{ asset('images/avatar.png') }}"
-                 class="w-10 h-10 rounded-full border object-cover"
-                 alt="Default Avatar">
-        @endif
+        @php $photo = $user->profile_photo ? asset('storage/'.$user->profile_photo) : asset('images/avatar.png'); @endphp
+        <img src="{{ $photo }}"
+             class="w-20 h-20 rounded-full border object-cover"
+             alt="Profile Photo">
 
         <div>
-            <p class="text-lg font-semibold">{{ $user->firstname }} {{ $user->lastname }}</p>
+            <p class="text-lg font-semibold">{{ $user->full_name }}</p>
             <p class="text-sm text-gray-600">{{ $user->email }}</p>
-            <span class="text-xs px-2 py-1 rounded 
+            <span class="text-xs px-2 py-1 rounded
                 {{ $user->status === 'active' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700' }}">
                 {{ ucfirst($user->status) }}
             </span>
@@ -29,11 +48,23 @@
     </div>
 
     <div class="space-y-2 text-sm">
-        <p><strong>Role:</strong> {{ ucfirst($user->role) }}</p>
-        @if ($user->role === 'student' && $user->student_id)
-            <p><strong>Student ID:</strong> {{ $user->student_id }}</p>
-        @elseif ($user->role === 'faculty' && $user->employee_no)
-            <p><strong>Employee No:</strong> {{ $user->employee_no }}</p>
+        <p class="flex items-center gap-2">
+            <strong>Role:</strong>
+            @if($activeRoles->isNotEmpty())
+                <span class="flex flex-wrap gap-1">
+                    @foreach ($activeRoles as $r)
+                        <span class="px-2 py-0.5 rounded-full text-xs bg-blue-100 text-blue-700 capitalize">{{ $r }}</span>
+                    @endforeach
+                </span>
+            @else
+                <span class="text-gray-600 capitalize">{{ $primaryRole ?? 'user' }}</span>
+            @endif
+        </p>
+
+        @if (($primaryRole === 'student' || $user->hasRole('student')) && $studentNo)
+            <p><strong>Student ID:</strong> {{ $studentNo }}</p>
+        @elseif (($primaryRole === 'faculty' || $user->hasRole('faculty')) && $employeeNo)
+            <p><strong>Employee No:</strong> {{ $employeeNo }}</p>
         @endif
     </div>
 
@@ -44,23 +75,11 @@
            Back
         </a>
 
-        {{-- Edit profile button depending on role --}}
-        @if ($user->role === 'student')
-            <a href="{{ route('student.profile.edit') }}"
-               class="px-4 py-2 text-sm bg-blue-600 text-white hover:bg-blue-700 rounded">
-               Edit Profile
-            </a>
-        @elseif ($user->role === 'faculty')
-            <a href="{{ route('faculty.profile.edit') }}"
-               class="px-4 py-2 text-sm bg-blue-600 text-white hover:bg-blue-700 rounded">
-               Edit Profile
-            </a>
-        @elseif ($user->role === 'admin')
-            <a href="{{ route('admin.profile.edit') }}"
-               class="px-4 py-2 text-sm bg-blue-600 text-white hover:bg-blue-700 rounded">
-               Edit Profile
-            </a>
-        @endif
+        {{-- Edit profile (based on resolved role) --}}
+        <a href="{{ $editRoute }}"
+           class="px-4 py-2 text-sm bg-blue-600 text-white hover:bg-blue-700 rounded">
+           Edit Profile
+        </a>
     </div>
 </div>
 @endsection

@@ -19,7 +19,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'active'  => \App\Http\Middleware\EnsureUserIsActive::class,   // if you keep an "active" check
             'device'  => \App\Http\Middleware\DeviceAuth::class,           // optional, for device-protected routes
             'nocache' => \App\Http\Middleware\PreventBackHistory::class,   // if you use it
-
+            'loadUserRole' => \App\Http\Middleware\LoadUserRole::class,
             // New multi-role middleware (replaces old "Role" enum-based middleware)
             'role' => \App\Http\Middleware\AuthMiddleware::class,
         ]);
