@@ -6,6 +6,7 @@ use Illuminate\Database\Seeder;
 use App\Models\YearLevel;
 use App\Models\Semester;
 use App\Models\SchoolYear;
+use App\Models\AttendanceStatus;
 
 class AcademicsSeeder extends Seeder
 {
@@ -31,5 +32,13 @@ class AcademicsSeeder extends Seeder
                 ['name' => $sem, 'school_year_id' => $schoolYear->id]
             );
         }
+
+                foreach (['Present', 'Late', 'Absent', 'Excused'] as $status) {
+            AttendanceStatus::firstOrCreate(['name' => $status]);
+        };
+
+
+
     }
+
 }
