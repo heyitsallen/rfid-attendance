@@ -10,23 +10,32 @@ use App\Models\{
 };
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\DB;
 
 class AttendanceApiController extends Controller
 {
+    private int $LATE_MINUTES = 15;
+
     public function scan(Request $r)
     {
-        Log::info('SCAN request', $r->all());
+        // Minimal logging; do NOT leak secrets in logs in production
+        Log::info('SCAN request', [
+            'serial_no' => $r->input('serial_no'),
+            'device'    => '***',
+            'uid'       => $r->input('uid'),
+            'ip'        => $r->ip(),
+        ]);
 
         $data = $r->validate([
             'serial_no'    => 'required|string',
             'device_token' => 'required|string',
-            'uid'          => 'required|string', // RFID card UID
+            'uid'          => 'required|string',
         ]);
 
-        $now        = Carbon::now('Asia/Manila');
-        $classDate  = $now->toDateString();
-        $timeNow    = $now->format('H:i:s');
-        $dayEnum    = $this->dayToEnum($now); // "Mon".."Sun"
+        $now       = Carbon::now('Asia/Manila');
+        $classDate = $now->toDateString();
+        $timeNow   = $now->format('H:i:s');
+        $dayEnum   = $this->dayToEnum($now);
 
         // 1) Verify device
         $device = Device::where('serial_no', $data['serial_no'])
@@ -42,8 +51,12 @@ class AttendanceApiController extends Controller
             ], 401);
         }
 
-        // 2) Resolve card -> user (only active cards)
-        $card = Card::where('uid', $data['uid'])->where('is_active', true)->with('user')->first();
+        // 2) Resolve active card → user
+        $card = Card::where('uid', $data['uid'])
+            ->where('is_active', true)
+            ->with('user.roles','user.studentProfile','user.facultyProfile')
+            ->first();
+
         if (!$card || !$card->user) {
             return response()->json([
                 'ok' => false,
@@ -52,8 +65,8 @@ class AttendanceApiController extends Controller
                 'beep' => 'error'
             ], 404);
         }
-        $user = $card->user;
 
+        $user      = $card->user;
         $isStudent = $user->hasRole('student');
         $isFaculty = $user->hasRole('faculty');
 
@@ -71,13 +84,10 @@ class AttendanceApiController extends Controller
             ->where('day', $dayEnum)
             ->whereTime('start_time', '<=', $timeNow)
             ->whereTime('end_time', '>=', $timeNow)
-            // Bind to device room if set
             ->when($device->room_id, fn($q) => $q->where('room_id', $device->room_id))
-            // If card user is faculty, only schedules taught by them
             ->when($isFaculty, function ($q) use ($user) {
                 $q->whereHas('assignment', fn($qa) => $qa->where('faculty_id', $user->id));
             })
-            // If card user is student, we don't filter here by enrollment (we’ll validate after we have a schedule)
             ->first();
 
         if (!$schedule) {
@@ -89,9 +99,9 @@ class AttendanceApiController extends Controller
             ], 200);
         }
 
-        // 3b) If student, validate enrollment for the schedule’s term (SY/Sem) and section
+        // If student, validate enrollment against this schedule's term + section
         if ($isStudent) {
-            $assignment = $schedule->assignment; // FacultyAssignedSubject
+            $assignment = $schedule->assignment;
             if (!$assignment) {
                 return response()->json([
                     'ok' => false,
@@ -117,16 +127,14 @@ class AttendanceApiController extends Controller
             }
         }
 
-        // 4) Handle attendance based on active role
+        // 4) Route by role
+        if ($isFaculty) {
+            return $this->handleFaculty($user, $schedule, $device, $now, $classDate);
+        }
         if ($isStudent) {
             return $this->handleStudent($user, $schedule, $device, $now, $classDate);
         }
 
-        if ($isFaculty) {
-            return $this->handleFaculty($user, $schedule, $device, $now, $classDate);
-        }
-
-        // Fallback (shouldn’t reach)
         return response()->json([
             'ok' => false,
             'display_line1' => 'ROLE NOT SUPPORTED',
@@ -135,39 +143,77 @@ class AttendanceApiController extends Controller
         ], 422);
     }
 
-private function handleStudent(User $user, SectionSchedule $schedule, Device $device, Carbon $now, string $classDate)
-{
-    $att = StudentAttendance::firstOrCreate(
-        [
-            'student_id'          => $user->id,
-            'section_schedule_id' => $schedule->id,
-            'class_date'          => $classDate,
-        ],
-        [
-            'device_id' => $device->id,
-        ]
-    );
+    private function handleStudent(User $user, SectionSchedule $schedule, Device $device, Carbon $now, string $classDate)
+    {
+        // Determine effective start based on FACULTY time_in for this class/day
+        $facultyIn = FacultyAttendance::where('section_schedule_id', $schedule->id)
+            ->where('class_date', $classDate)
+            ->value('time_in'); // Carbon|string|null
 
-    // Safely parse start time
-    $rawStart = $schedule->getRawOriginal('start_time') ?? '00:00:00';
-    $start    = Carbon::parse($classDate.' '.$rawStart, 'Asia/Manila');
+        $att = StudentAttendance::firstOrCreate(
+            [
+                'student_id'          => $user->id,
+                'section_schedule_id' => $schedule->id,
+                'class_date'          => $classDate,
+            ],
+            [
+                'device_id' => $device->id,
+            ]
+        );
 
-    // Resolve extra display info
-    $fullName = $user->full_name; // accessor you already have
-    $subject  = $schedule->assignment?->subject?->course_code ?? '';
-    $section  = $schedule->section?->name ?? '';
-    $dateDisp = $now->format('M d, Y');
+        // Prepare display
+        $fullName = $user->full_name;
+        $subject  = $schedule->assignment?->subject?->course_code ?? '';
+        $section  = $schedule->section?->name ?? '';
+        $dateDisp = $now->format('M d, Y');
 
-    // If no time_in yet → mark IN
-    if (is_null($att->time_in)) {
-        $att->time_in   = $now;
-        $att->status    = $now->greaterThan($start->copy()->addMinutes(15)) ? 'late' : 'present';
-        $att->device_id = $device->id;
-        $att->save();
+        // IN
+        if (is_null($att->time_in)) {
+            $att->time_in   = $now;
+            $att->device_id = $device->id;
 
+            // RULE: If faculty NOT yet IN → student is PRESENT regardless of time.
+            if (empty($facultyIn)) {
+                $att->status = 'present';
+            } else {
+                // Grace starts from facultyIn
+                $facultyStart = Carbon::parse($facultyIn, 'Asia/Manila');
+                $isLate = $now->greaterThan($facultyStart->copy()->addMinutes($this->LATE_MINUTES));
+                $att->status = $isLate ? 'late' : 'present';
+            }
+
+            $att->save();
+
+            return response()->json([
+                'ok' => true,
+                'display_line1' => "WELCOME",
+                'display_line2' => $fullName,
+                'display_line3' => "$subject - $section",
+                'display_line4' => $dateDisp,
+                'beep' => 'ok'
+            ], 200);
+        }
+
+        // OUT
+        if (is_null($att->time_out)) {
+            $att->time_out  = $now;
+            $att->device_id = $device->id;
+            $att->save();
+
+            return response()->json([
+                'ok' => true,
+                'display_line1' => "GOODBYE",
+                'display_line2' => $fullName,
+                'display_line3' => "$subject - $section",
+                'display_line4' => $dateDisp,
+                'beep' => 'double'
+            ], 200);
+        }
+
+        // Already completed
         return response()->json([
             'ok' => true,
-            'display_line1' => "WELCOME",
+            'display_line1' => "ALREADY MARKED",
             'display_line2' => $fullName,
             'display_line3' => "$subject - $section",
             'display_line4' => $dateDisp,
@@ -175,38 +221,8 @@ private function handleStudent(User $user, SectionSchedule $schedule, Device $de
         ], 200);
     }
 
-    // If time_in exists but no time_out → mark OUT
-    if (is_null($att->time_out)) {
-        $att->time_out  = $now;
-        $att->device_id = $device->id;
-        $att->save();
-
-        return response()->json([
-            'ok' => true,
-            'display_line1' => "GOODBYE",
-            'display_line2' => $fullName,
-            'display_line3' => "$subject - $section",
-            'display_line4' => $dateDisp,
-            'beep' => 'double'
-        ], 200);
-    }
-
-    // Otherwise, already completed IN/OUT
-    return response()->json([
-        'ok' => true,
-        'display_line1' => "ALREADY MARKED",
-        'display_line2' => $fullName,
-        'display_line3' => "$subject - $section",
-        'display_line4' => $dateDisp,
-        'beep' => 'ok'
-    ], 200);
-}
-
-
-
     private function handleFaculty(User $user, SectionSchedule $schedule, Device $device, Carbon $now, string $classDate)
     {
-        // Ensure faculty matches schedule (derived from assignment)
         $assignment = $schedule->assignment;
         if (!$assignment || (int)$assignment->faculty_id !== (int)$user->id) {
             return response()->json([
@@ -217,50 +233,109 @@ private function handleStudent(User $user, SectionSchedule $schedule, Device $de
             ], 200);
         }
 
-        $att = FacultyAttendance::firstOrCreate(
-            [
-                'section_schedule_id' => $schedule->id,
-                'class_date'          => $classDate,
-            ],
-            [
-                'device_id' => $device->id,
-            ]
-        );
+        return DB::transaction(function () use ($user, $schedule, $device, $now, $classDate, $assignment) {
+            $att = FacultyAttendance::firstOrCreate(
+                [
+                    'section_schedule_id' => $schedule->id,
+                    'class_date'          => $classDate,
+                ],
+                [
+                    'device_id' => $device->id,
+                ]
+            );
 
-        if (is_null($att->time_in)) {
-            $att->time_in = $now;
-            $att->status  = 'in';
-            $att->device_id = $device->id;
-            $att->save();
+            // FACULTY IN → defines class start & begins grace for students
+            if (is_null($att->time_in)) {
+                $att->time_in   = $now;
+                $att->status    = 'in';
+                $att->device_id = $device->id;
+                $att->save();
 
+                return response()->json([
+                    'ok' => true,
+                    'display_line1' => 'FACULTY IN',
+                    'display_line2' => $user->facultyProfile?->employee_no ?? $user->full_name,
+                    'display_line3' => 'Grace started',
+                    'beep' => 'ok'
+                ], 200);
+            }
+
+            // FACULTY OUT → auto student OUT + auto ABSENT for non-tappers
+            if (is_null($att->time_out)) {
+                $att->time_out  = $now;
+                $att->status    = 'out';
+                $att->device_id = $device->id;
+                $att->save();
+
+                // 1) AUTO-TIMEOUT students who tapped IN but not OUT
+                $autoOutAt = $now;
+                $autoOutCount = StudentAttendance::where('section_schedule_id', $schedule->id)
+                    ->where('class_date', $classDate)
+                    ->whereNotNull('time_in')
+                    ->whereNull('time_out')
+                    ->update([
+                        'time_out'   => $autoOutAt,
+                        'updated_at' => now(),
+                    ]);
+
+                // 2) AUTO-ABSENT all enrolled students who never tapped (no attendance row)
+                // Get enrolled student IDs for this section & term
+                $enrolledIds = SectionEnrollment::where('section_id', $schedule->section_id)
+                    ->where('school_year_id', $assignment->school_year_id)
+                    ->where('semester_id', $assignment->semester_id)
+                    ->pluck('student_id')
+                    ->unique()
+                    ->values();
+
+                if ($enrolledIds->isNotEmpty()) {
+                    // Find who already has an attendance row (any)
+                    $already = StudentAttendance::where('section_schedule_id', $schedule->id)
+                        ->where('class_date', $classDate)
+                        ->whereIn('student_id', $enrolledIds)
+                        ->pluck('student_id')
+                        ->unique();
+
+                    $missing = $enrolledIds->diff($already);
+
+                    // Insert ABSENT rows for missing
+                    if ($missing->isNotEmpty()) {
+                        $nowTs = now();
+                        $rows = $missing->map(function ($sid) use ($schedule, $classDate, $device, $nowTs) {
+                            return [
+                                'student_id'          => $sid,
+                                'section_schedule_id' => $schedule->id,
+                                'class_date'          => $classDate,
+                                'status'              => 'absent',
+                                'device_id'           => $device->id,   // marks device that closed class
+                                'created_at'          => $nowTs,
+                                'updated_at'          => $nowTs,
+                            ];
+                        })->all();
+
+                        // Bulk insert
+                        StudentAttendance::insert($rows);
+                    }
+                }
+
+                $absentCount = isset($rows) ? count($rows) : 0;
+
+                return response()->json([
+                    'ok' => true,
+                    'display_line1' => 'FACULTY OUT',
+                    'display_line2' => $user->facultyProfile?->employee_no ?? $user->full_name,
+                    'display_line3' => "Auto-out: {$autoOutCount}  Absent: {$absentCount}",
+                    'beep' => 'double'
+                ], 200);
+            }
+
+            // Already completed
             return response()->json([
                 'ok' => true,
-                'display_line1' => 'FACULTY IN',
+                'display_line1' => 'ALREADY MARKED',
                 'display_line2' => $user->facultyProfile?->employee_no ?? $user->full_name,
                 'beep' => 'ok'
             ], 200);
-        }
-
-        if (is_null($att->time_out)) {
-            $att->time_out = $now;
-            $att->status   = 'out';
-            $att->device_id = $device->id;
-            $att->save();
-
-            return response()->json([
-                'ok' => true,
-                'display_line1' => 'FACULTY OUT',
-                'display_line2' => $user->facultyProfile?->employee_no ?? $user->full_name,
-                'beep' => 'double'
-            ], 200);
-        }
-
-        return response()->json([
-            'ok' => true,
-            'display_line1' => 'ALREADY MARKED',
-            'display_line2' => $user->facultyProfile?->employee_no ?? $user->full_name,
-            'beep' => 'ok'
-        ], 200);
+        });
     }
 
     private function dayToEnum(Carbon $now): string
