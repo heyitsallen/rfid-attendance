@@ -145,8 +145,8 @@ class ITClassDemoSeeder extends Seeder
 
         // --- RFID Cards (UIDs) ---
         // Replace these placeholders with actual UIDs from your RC522 scanner.
-        $studentUid = 'CEBA4D05'; // <-- change me
-        $facultyUid = 'F2D20B01'; // <-- change me
+        $studentUid = 'CEBA4D05';
+        $facultyUid = 'F2D20B01';
 
         Card::firstOrCreate(
             ['uid' => $studentUid, 'school_year_id' => $sy->id],

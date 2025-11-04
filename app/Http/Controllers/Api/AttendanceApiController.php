@@ -6,7 +6,7 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Models\{
     Device, User, Card, SectionSchedule,
-    StudentAttendance, FacultyAttendance, SectionEnrollment
+    StudentAttendance, FacultyAttendance, SectionEnrollment, StudentScheduleEnrollment
 };
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Log;
@@ -18,10 +18,9 @@ class AttendanceApiController extends Controller
 
     public function scan(Request $r)
     {
-        // Minimal logging; do NOT leak secrets in logs in production
+        // Keep logs minimal; avoid leaking secrets
         Log::info('SCAN request', [
             'serial_no' => $r->input('serial_no'),
-            'device'    => '***',
             'uid'       => $r->input('uid'),
             'ip'        => $r->ip(),
         ]);
@@ -51,7 +50,7 @@ class AttendanceApiController extends Controller
             ], 401);
         }
 
-        // 2) Resolve active card → user
+        // 2) Resolve card -> user (active only)
         $card = Card::where('uid', $data['uid'])
             ->where('is_active', true)
             ->with('user.roles','user.studentProfile','user.facultyProfile')
@@ -79,7 +78,7 @@ class AttendanceApiController extends Controller
             ], 422);
         }
 
-        // 3) Find a current schedule window (by day/time and optional room)
+        // 3) Find current schedule by day/time (+ optional room) at *this* moment
         $schedule = SectionSchedule::with(['assignment.faculty','assignment.subject','section','room'])
             ->where('day', $dayEnum)
             ->whereTime('start_time', '<=', $timeNow)
@@ -99,7 +98,7 @@ class AttendanceApiController extends Controller
             ], 200);
         }
 
-        // If student, validate enrollment against this schedule's term + section
+        // If student, validate enrollment for this section/schedule & term (regular OR irregular)
         if ($isStudent) {
             $assignment = $schedule->assignment;
             if (!$assignment) {
@@ -111,13 +110,21 @@ class AttendanceApiController extends Controller
                 ], 200);
             }
 
-            $enrolled = SectionEnrollment::where('student_id', $user->id)
+            // A) Regular section-wide enrollment
+            $enrolledRegular = SectionEnrollment::where('student_id', $user->id)
                 ->where('section_id', $schedule->section_id)
                 ->where('school_year_id', $assignment->school_year_id)
                 ->where('semester_id', $assignment->semester_id)
                 ->exists();
 
-            if (!$enrolled) {
+            // B) Irregular/cross-enrollment bound to this exact schedule
+            $enrolledIrregular = StudentScheduleEnrollment::where('student_id', $user->id)
+                ->where('section_schedule_id', $schedule->id)
+                ->where('school_year_id', $assignment->school_year_id)
+                ->where('semester_id', $assignment->semester_id)
+                ->exists();
+
+            if (!($enrolledRegular || $enrolledIrregular)) {
                 return response()->json([
                     'ok' => false,
                     'display_line1' => 'NOT ENROLLED',
@@ -145,10 +152,10 @@ class AttendanceApiController extends Controller
 
     private function handleStudent(User $user, SectionSchedule $schedule, Device $device, Carbon $now, string $classDate)
     {
-        // Determine effective start based on FACULTY time_in for this class/day
+        // Look up faculty IN for grace anchor
         $facultyIn = FacultyAttendance::where('section_schedule_id', $schedule->id)
             ->where('class_date', $classDate)
-            ->value('time_in'); // Carbon|string|null
+            ->value('time_in'); // nullable
 
         $att = StudentAttendance::firstOrCreate(
             [
@@ -161,7 +168,6 @@ class AttendanceApiController extends Controller
             ]
         );
 
-        // Prepare display
         $fullName = $user->full_name;
         $subject  = $schedule->assignment?->subject?->course_code ?? '';
         $section  = $schedule->section?->name ?? '';
@@ -172,14 +178,13 @@ class AttendanceApiController extends Controller
             $att->time_in   = $now;
             $att->device_id = $device->id;
 
-            // RULE: If faculty NOT yet IN → student is PRESENT regardless of time.
+            // If faculty not yet IN → always present regardless of time
             if (empty($facultyIn)) {
                 $att->status = 'present';
             } else {
-                // Grace starts from facultyIn
-                $facultyStart = Carbon::parse($facultyIn, 'Asia/Manila');
-                $isLate = $now->greaterThan($facultyStart->copy()->addMinutes($this->LATE_MINUTES));
-                $att->status = $isLate ? 'late' : 'present';
+                $anchor = Carbon::parse($facultyIn, 'Asia/Manila');
+                $att->status = $now->greaterThan($anchor->copy()->addMinutes($this->LATE_MINUTES))
+                    ? 'late' : 'present';
             }
 
             $att->save();
@@ -196,8 +201,34 @@ class AttendanceApiController extends Controller
 
         // OUT
         if (is_null($att->time_out)) {
+            // Allow OUT only if still within this schedule window (date & time)
+            $startRaw = $schedule->getRawOriginal('start_time') ?? '00:00:00';
+            $endRaw   = $schedule->getRawOriginal('end_time')   ?? '23:59:59';
+            $winStart = Carbon::parse($classDate.' '.$startRaw, 'Asia/Manila');
+            $winEnd   = Carbon::parse($classDate.' '.$endRaw,   'Asia/Manila');
+
+            if ($now->lt($winStart) || $now->gt($winEnd)) {
+                return response()->json([
+                    'ok' => false,
+                    'display_line1' => "OUTSIDE WINDOW",
+                    'display_line2' => "Cannot time-out",
+                    'beep' => 'error'
+                ], 200);
+            }
+
             $att->time_out  = $now;
             $att->device_id = $device->id;
+
+            // Overwrite status from ABSENT → correct (present/late) using facultyIn anchor
+            if (empty($facultyIn)) {
+                $att->status = 'present';
+            } else {
+                $anchor = Carbon::parse($facultyIn, 'Asia/Manila');
+                $isLate = Carbon::parse($att->time_in, 'Asia/Manila')
+                    ->greaterThan($anchor->copy()->addMinutes($this->LATE_MINUTES));
+                $att->status = $isLate ? 'late' : 'present';
+            }
+
             $att->save();
 
             return response()->json([
@@ -210,7 +241,7 @@ class AttendanceApiController extends Controller
             ], 200);
         }
 
-        // Already completed
+        // Completed already
         return response()->json([
             'ok' => true,
             'display_line1' => "ALREADY MARKED",
@@ -244,7 +275,7 @@ class AttendanceApiController extends Controller
                 ]
             );
 
-            // FACULTY IN → defines class start & begins grace for students
+            // FACULTY IN = start anchor for students
             if (is_null($att->time_in)) {
                 $att->time_in   = $now;
                 $att->status    = 'in';
@@ -260,35 +291,40 @@ class AttendanceApiController extends Controller
                 ], 200);
             }
 
-            // FACULTY OUT → auto student OUT + auto ABSENT for non-tappers
+            // FACULTY OUT
             if (is_null($att->time_out)) {
                 $att->time_out  = $now;
                 $att->status    = 'out';
                 $att->device_id = $device->id;
                 $att->save();
 
-                // 1) AUTO-TIMEOUT students who tapped IN but not OUT
-                $autoOutAt = $now;
-                $autoOutCount = StudentAttendance::where('section_schedule_id', $schedule->id)
+                // A) Mark ABSENT: students who tapped IN but never tapped OUT
+                $absentFromOpen = StudentAttendance::where('section_schedule_id', $schedule->id)
                     ->where('class_date', $classDate)
                     ->whereNotNull('time_in')
                     ->whereNull('time_out')
                     ->update([
-                        'time_out'   => $autoOutAt,
+                        'status'     => 'absent',
                         'updated_at' => now(),
                     ]);
 
-                // 2) AUTO-ABSENT all enrolled students who never tapped (no attendance row)
-                // Get enrolled student IDs for this section & term
-                $enrolledIds = SectionEnrollment::where('section_id', $schedule->section_id)
+                // B) Mark ABSENT: ALL enrolled (regular + irregular) with NO attendance row
+                // Regular enrollments for the section (SY/Sem)
+                $regularIds = SectionEnrollment::where('section_id', $schedule->section_id)
                     ->where('school_year_id', $assignment->school_year_id)
                     ->where('semester_id', $assignment->semester_id)
-                    ->pluck('student_id')
-                    ->unique()
-                    ->values();
+                    ->pluck('student_id');
 
+                // Irregular enrollments bound to this schedule (SY/Sem)
+                $irregIds = StudentScheduleEnrollment::where('section_schedule_id', $schedule->id)
+                    ->where('school_year_id', $assignment->school_year_id)
+                    ->where('semester_id', $assignment->semester_id)
+                    ->pluck('student_id');
+
+                $enrolledIds = $regularIds->merge($irregIds)->unique()->values();
+
+                $inserted = 0;
                 if ($enrolledIds->isNotEmpty()) {
-                    // Find who already has an attendance row (any)
                     $already = StudentAttendance::where('section_schedule_id', $schedule->id)
                         ->where('class_date', $classDate)
                         ->whereIn('student_id', $enrolledIds)
@@ -297,7 +333,6 @@ class AttendanceApiController extends Controller
 
                     $missing = $enrolledIds->diff($already);
 
-                    // Insert ABSENT rows for missing
                     if ($missing->isNotEmpty()) {
                         $nowTs = now();
                         $rows = $missing->map(function ($sid) use ($schedule, $classDate, $device, $nowTs) {
@@ -306,24 +341,22 @@ class AttendanceApiController extends Controller
                                 'section_schedule_id' => $schedule->id,
                                 'class_date'          => $classDate,
                                 'status'              => 'absent',
-                                'device_id'           => $device->id,   // marks device that closed class
+                                'device_id'           => $device->id, // device that closed the class
                                 'created_at'          => $nowTs,
                                 'updated_at'          => $nowTs,
                             ];
                         })->all();
 
-                        // Bulk insert
                         StudentAttendance::insert($rows);
+                        $inserted = count($rows);
                     }
                 }
-
-                $absentCount = isset($rows) ? count($rows) : 0;
 
                 return response()->json([
                     'ok' => true,
                     'display_line1' => 'FACULTY OUT',
                     'display_line2' => $user->facultyProfile?->employee_no ?? $user->full_name,
-                    'display_line3' => "Auto-out: {$autoOutCount}  Absent: {$absentCount}",
+                    'display_line3' => "Absent set (open: {$absentFromOpen}, none: {$inserted})",
                     'beep' => 'double'
                 ], 200);
             }
