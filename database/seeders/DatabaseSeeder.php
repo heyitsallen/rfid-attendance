@@ -14,6 +14,7 @@ class DatabaseSeeder extends Seeder
             AcademicsSeeder::class,
             RoomsAndDevicesSeeder::class,
             ITClassDemoSeeder::class,
+            IrregularEnrollmentSeeder::class,
         ]);
     }
 }

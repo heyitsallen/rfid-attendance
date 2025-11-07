@@ -24,6 +24,10 @@ return new class extends Migration {
             $table->index(['student_id','school_year_id','semester_id'], 'idx_student_term');
             $table->index(['section_schedule_id'], 'idx_schedule');
         });
+
+                Schema::table('student_schedule_enrollments', function (Blueprint $table) {
+            $table->comment('Irregular/cross-enrollment linking a student to a specific section_schedule for a given SY/Sem');
+        });
     }
     public function down(): void {
         Schema::dropIfExists('student_schedule_enrollments');

@@ -121,4 +121,9 @@ class User extends Authenticatable
         return $full;
     }
 
+    public function irregularSchedules() {
+    return $this->hasMany(StudentScheduleEnrollment::class, 'student_id');
+}
+
+
 }

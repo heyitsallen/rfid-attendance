@@ -12,7 +12,7 @@ class LoadUserRole
     public function handle($request, Closure $next)
     {
         if ($user = auth()->user()) {
-            $user->loadMissing('role');
+            $user->loadMissing('roles');
         }
         return $next($request);
     }
